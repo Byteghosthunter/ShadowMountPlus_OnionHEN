@@ -1016,6 +1016,13 @@ static struct json_object *installed_pkg_to_json(
   if (!metadata || !is_supported_game_title_id(metadata->title_id))
     return NULL;
 
+  // FAKE10101 is ShadowMountPlus' own Shell launcher icon. It is registered
+  // in app.db when the Web API is enabled so the dashboard can open the
+  // local web UI, but it is not a game and must not appear in the game
+  // library as an installed package.
+  if (strcmp(metadata->title_id, "FAKE10101") == 0)
+    return NULL;
+
   char install_path[MAX_PATH];
   if (!resolve_installed_pkg_path(metadata->title_id, install_path))
     return NULL;
