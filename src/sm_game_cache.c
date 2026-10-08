@@ -20,6 +20,7 @@ struct GameCache {
   char title_name[MAX_TITLE_NAME];
   char owning_scan_root[MAX_PATH];
   uint64_t missing_since_us;
+  bool lifecycle_managed;
   bool valid;
 };
 
@@ -95,13 +96,15 @@ static bool resolve_game_cache_owning_scan_root(const char *path,
 static void write_game_cache_slot(struct GameCache *entry, const char *path,
                                   const char *title_id,
                                   const char *title_name,
-                                  const char *owning_scan_root) {
+                                  const char *owning_scan_root,
+                                  bool lifecycle_managed) {
   (void)strlcpy(entry->path, path, sizeof(entry->path));
   (void)strlcpy(entry->title_id, title_id, sizeof(entry->title_id));
   (void)strlcpy(entry->title_name, title_name, sizeof(entry->title_name));
   (void)strlcpy(entry->owning_scan_root, owning_scan_root,
                 sizeof(entry->owning_scan_root));
   entry->missing_since_us = 0;
+  entry->lifecycle_managed = lifecycle_managed;
   entry->valid = true;
 }
 
@@ -167,7 +170,7 @@ void cache_game_entry(const char *path, const char *title_id,
       continue;
     }
     write_game_cache_slot(&g_game_cache[k], path, title_id, title_name,
-                          owning_scan_root);
+                          owning_scan_root, true);
     pthread_mutex_unlock(&g_game_cache_mutex);
     return;
   }
@@ -175,10 +178,55 @@ void cache_game_entry(const char *path, const char *title_id,
   for (int k = 0; k < MAX_PENDING; k++) {
     if (!g_game_cache[k].valid) {
       write_game_cache_slot(&g_game_cache[k], path, title_id, title_name,
-                            owning_scan_root);
+                            owning_scan_root, true);
       pthread_mutex_unlock(&g_game_cache_mutex);
       return;
     }
+  }
+  pthread_mutex_unlock(&g_game_cache_mutex);
+}
+
+void cache_discovered_game_entry(const char *path, const char *title_id,
+                                 const char *title_name) {
+  if (!path || !title_id || title_id[0] == '\0')
+    return;
+
+  char owning_scan_root[MAX_PATH];
+  (void)resolve_game_cache_owning_scan_root(path, title_id,
+                                            owning_scan_root);
+
+  pthread_mutex_lock(&g_game_cache_mutex);
+  for (int k = 0; k < MAX_PENDING; k++) {
+    if (!g_game_cache[k].valid)
+      continue;
+    if (strcmp(g_game_cache[k].path, path) != 0 &&
+        strcmp(g_game_cache[k].title_id, title_id) != 0) {
+      continue;
+    }
+
+    // Never let a passive discovery replace an active ShadowMount source for
+    // the same title. It may refresh the same passive source, though.
+    if (g_game_cache[k].lifecycle_managed &&
+        strcmp(g_game_cache[k].path, path) != 0) {
+      pthread_mutex_unlock(&g_game_cache_mutex);
+      return;
+    }
+    bool managed = g_game_cache[k].lifecycle_managed;
+    write_game_cache_slot(&g_game_cache[k], path, title_id,
+                          title_name ? title_name : "", owning_scan_root,
+                          managed);
+    pthread_mutex_unlock(&g_game_cache_mutex);
+    return;
+  }
+
+  for (int k = 0; k < MAX_PENDING; k++) {
+    if (g_game_cache[k].valid)
+      continue;
+    write_game_cache_slot(&g_game_cache[k], path, title_id,
+                          title_name ? title_name : "", owning_scan_root,
+                          false);
+    pthread_mutex_unlock(&g_game_cache_mutex);
+    return;
   }
   pthread_mutex_unlock(&g_game_cache_mutex);
 }
@@ -206,6 +254,10 @@ static void prune_game_cache_entries(const char *root) {
         log_debug("  [CACHE] source restored, auto-remove cancelled: %s (%s)",
                   entry->title_id, entry->path);
       }
+      continue;
+    }
+    if (!entry->lifecycle_managed) {
+      clear_game_cache_slot(k, "discovered source removed");
       continue;
     }
     if (auto_remove)
@@ -242,7 +294,8 @@ void note_game_cache_source_seen(const char *path, const char *title_id,
       continue;
 
     write_game_cache_slot(&g_game_cache[k], path, title_id,
-                          title_name ? title_name : "", owning_scan_root);
+                          title_name ? title_name : "", owning_scan_root,
+                          g_game_cache[k].lifecycle_managed);
     log_debug("  [CACHE] source restored, auto-remove cancelled: %s (%s)",
               title_id, path);
     break;
@@ -256,10 +309,16 @@ static void reconcile_missing_game_cache(
   pthread_mutex_lock(&g_game_cache_mutex);
   for (int k = 0; k < MAX_PENDING; ++k) {
     struct GameCache *entry = &g_game_cache[k];
-    if (!entry->valid || game_cache_source_exists(entry) ||
-        app_db_title_list_contains(auto_remove_titles, entry->title_id)) {
+    if (!entry->valid)
+      continue;
+    if (game_cache_source_exists(entry))
+      continue;
+    if (!entry->lifecycle_managed) {
+      clear_game_cache_slot(k, "discovered source removed");
       continue;
     }
+    if (app_db_title_list_contains(auto_remove_titles, entry->title_id))
+      continue;
     clear_game_cache_slot(k, "source removed");
   }
   pthread_mutex_unlock(&g_game_cache_mutex);
@@ -281,7 +340,8 @@ static void reconcile_missing_game_cache(
           free_index = k;
         continue;
       }
-      if (strcmp(g_game_cache[k].title_id, title_id) == 0) {
+      if (strcmp(g_game_cache[k].title_id, title_id) == 0 &&
+          g_game_cache[k].lifecycle_managed) {
         entry_index = k;
         break;
       }
@@ -311,7 +371,7 @@ static void reconcile_missing_game_cache(
       }
     } else if (!image_source_exists && free_index >= 0) {
       struct GameCache *entry = &g_game_cache[free_index];
-      write_game_cache_slot(entry, "", title_id, "", "");
+      write_game_cache_slot(entry, "", title_id, "", "", true);
       start_missing_timer(entry, now_us);
     } else if (!image_source_exists && !cache_full_logged) {
       log_debug("  [CACHE] auto-remove tracking full; remaining titles deferred");
@@ -463,6 +523,7 @@ bool sm_game_cache_snapshot(sm_game_cache_snapshot_entry_t **entries_out,
                   sizeof(entry->title_id));
     (void)strlcpy(entry->title_name, g_game_cache[k].title_name,
                   sizeof(entry->title_name));
+    entry->lifecycle_managed = g_game_cache[k].lifecycle_managed;
   }
   pthread_mutex_unlock(&g_game_cache_mutex);
   *entries_out = entries;

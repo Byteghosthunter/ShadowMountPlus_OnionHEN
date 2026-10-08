@@ -1,0 +1,631 @@
+diff --git a/config.ini.example b/config.ini.example
+index 70121ca..61be745 100644
+--- a/config.ini.example
++++ b/config.ini.example
+@@ -232,3 +232,6 @@
+ ## More custom scan root examples:
+ ## scanpath=/data/homebrew
+ ## scanpath=/data/etaHEN/games
++## scanpath=/data/OnionHEN/games
++## scanpath=/mnt/ext1/etaHEN/games
++## scanpath=/mnt/ext1/OnionHEN/games
+diff --git a/include/sm_game_cache.h b/include/sm_game_cache.h
+index e76380c..d209c26 100644
+--- a/include/sm_game_cache.h
++++ b/include/sm_game_cache.h
+@@ -10,15 +10,20 @@ typedef struct {
+   char path[MAX_PATH];
+   char title_id[MAX_TITLE_ID];
+   char title_name[MAX_TITLE_NAME];
++  bool lifecycle_managed;
+ } sm_game_cache_snapshot_entry_t;
+ 
+ typedef bool (*game_cache_iter_fn)(const char *path, const char *title_id,
+                                    const char *title_name,
+                                    const char *owning_scan_root, void *ctx);
+ 
+-// Cache resolved metadata for a mounted or discovered game.
++// Cache a game whose registration/mount lifecycle is managed by ShadowMount.
+ void cache_game_entry(const char *path, const char *title_id,
+                       const char *title_name);
++// Cache a valid discovered folder source for library visibility without
++// claiming lifecycle ownership. A later successful mount upgrades the entry.
++void cache_discovered_game_entry(const char *path, const char *title_id,
++                                 const char *title_name);
+ // Drop invalid or stale entries from the game cache.
+ void prune_game_cache(void);
+ // Drop invalid or stale entries that belong to a specific scan root.
+diff --git a/include/sm_paths.h b/include/sm_paths.h
+index 6ae7e47..6534f17 100644
+--- a/include/sm_paths.h
++++ b/include/sm_paths.h
+@@ -35,22 +35,30 @@
+ #define SM_DEFAULT_SCAN_PATHS_INITIALIZER                                      \
+   {                                                                            \
+     /* Internal */                                                             \
+-    DEFAULT_BACKPORT_SCAN_PATH, "/data/etaHEN/games",                          \
++    DEFAULT_BACKPORT_SCAN_PATH, "/data/etaHEN/games",                         \
++        "/data/OnionHEN/games",                                               \
+     /* Extended Storage */                                                     \
+-    "/mnt/ext0/homebrew", "/mnt/ext0/etaHEN/games",                           \
++    "/mnt/ext0/homebrew", "/mnt/ext0/etaHEN/games",                          \
++        "/mnt/ext0/OnionHEN/games",                                           \
+     /* M.2 Drive */                                                            \
+-    "/mnt/ext1/homebrew", "/mnt/ext1/etaHEN/games",                           \
++    "/mnt/ext1/homebrew", "/mnt/ext1/etaHEN/games",                          \
++        "/mnt/ext1/OnionHEN/games",                                           \
+     /* USB Subfolders */                                                       \
+-    "/mnt/usb0/homebrew", "/mnt/usb1/homebrew", "/mnt/usb2/homebrew",         \
+-        "/mnt/usb3/homebrew", "/mnt/usb4/homebrew", "/mnt/usb5/homebrew",     \
+-        "/mnt/usb6/homebrew", "/mnt/usb7/homebrew",                           \
+-        "/mnt/usb0/etaHEN/games", "/mnt/usb1/etaHEN/games",                   \
+-        "/mnt/usb2/etaHEN/games", "/mnt/usb3/etaHEN/games",                   \
+-        "/mnt/usb4/etaHEN/games", "/mnt/usb5/etaHEN/games",                   \
+-        "/mnt/usb6/etaHEN/games", "/mnt/usb7/etaHEN/games",                   \
+-    /* USB Root Paths */                                                       \
+-    "/mnt/usb0", "/mnt/usb1", "/mnt/usb2", "/mnt/usb3", "/mnt/usb4",          \
+-        "/mnt/usb5", "/mnt/usb6", "/mnt/usb7", "/mnt/ext0", "/mnt/ext1", NULL \
++    "/mnt/usb0/homebrew", "/mnt/usb1/homebrew", "/mnt/usb2/homebrew",        \
++        "/mnt/usb3/homebrew", "/mnt/usb4/homebrew", "/mnt/usb5/homebrew",    \
++        "/mnt/usb6/homebrew", "/mnt/usb7/homebrew",                          \
++        "/mnt/usb0/etaHEN/games", "/mnt/usb1/etaHEN/games",                  \
++        "/mnt/usb2/etaHEN/games", "/mnt/usb3/etaHEN/games",                  \
++        "/mnt/usb4/etaHEN/games", "/mnt/usb5/etaHEN/games",                  \
++        "/mnt/usb6/etaHEN/games", "/mnt/usb7/etaHEN/games",                  \
++        "/mnt/usb0/OnionHEN/games", "/mnt/usb1/OnionHEN/games",              \
++        "/mnt/usb2/OnionHEN/games", "/mnt/usb3/OnionHEN/games",              \
++        "/mnt/usb4/OnionHEN/games", "/mnt/usb5/OnionHEN/games",              \
++        "/mnt/usb6/OnionHEN/games", "/mnt/usb7/OnionHEN/games",              \
++    /* USB / storage root paths */                                             \
++    "/mnt/usb0", "/mnt/usb1", "/mnt/usb2", "/mnt/usb3", "/mnt/usb4",     \
++        "/mnt/usb5", "/mnt/usb6", "/mnt/usb7", "/mnt/ext0", "/mnt/ext1", \
++        NULL                                                                   \
+   }
+ 
+ #endif
+diff --git a/src/sm_api_service.c b/src/sm_api_service.c
+index 72a5062..42fed4e 100644
+--- a/src/sm_api_service.c
++++ b/src/sm_api_service.c
+@@ -972,6 +972,107 @@ static bool resolve_game_icon_path(const char *title_id,
+          copy_regular_file_path(candidate, out);
+ }
+ 
++static bool resolve_installed_pkg_path(const char *title_id,
++                                       char path_out[MAX_PATH]) {
++  if (!title_id || !is_supported_game_title_id(title_id) || !path_out)
++    return false;
++
++  static const char *const path_formats[] = {
++      APP_BASE "/%s",
++      "/mnt/ext0/user/app/%s",
++      "/mnt/ext0/ps5/user/app/%s",
++      "/mnt/ext1/user/app/%s",
++  };
++
++  path_out[0] = '\0';
++  for (size_t i = 0; i < sizeof(path_formats) / sizeof(path_formats[0]); ++i) {
++    int written = snprintf(path_out, MAX_PATH, path_formats[i], title_id);
++    if (written < 0 || written >= MAX_PATH)
++      continue;
++    struct stat st;
++    if (stat(path_out, &st) == 0 && S_ISDIR(st.st_mode))
++      return true;
++  }
++
++  path_out[0] = '\0';
++  return false;
++}
++
++static bool game_snapshot_contains_title(
++    const sm_game_cache_snapshot_entry_t *snapshot, size_t count,
++    const char *title_id) {
++  if (!snapshot || !title_id)
++    return false;
++  for (size_t i = 0; i < count; ++i) {
++    if (strcmp(snapshot[i].title_id, title_id) == 0)
++      return true;
++  }
++  return false;
++}
++
++static struct json_object *installed_pkg_to_json(
++    const sm_app_db_game_info_t *metadata, bool include_size,
++    bool thumbnail_icon) {
++  if (!metadata || !is_supported_game_title_id(metadata->title_id))
++    return NULL;
++
++  char install_path[MAX_PATH];
++  if (!resolve_installed_pkg_path(metadata->title_id, install_path))
++    return NULL;
++
++  struct json_object *item = json_object_new_object();
++  if (!item)
++    return NULL;
++
++  char icon_url[SM_API_ROUTE_SIZE + MAX_TITLE_ID + 32u];
++  char icon_path[MAX_PATH];
++  icon_url[0] = '\0';
++  if (resolve_game_icon_path(metadata->title_id, metadata->icon_path,
++                             icon_path)) {
++    struct stat icon_st;
++    if (stat(icon_path, &icon_st) == 0) {
++      const char *size_arg = thumbnail_icon ? "&size=thumb" : "";
++      (void)snprintf(icon_url, sizeof(icon_url), "%s?title_id=%s%s&v=%lld-%lld",
++                     SM_API_ROUTE_GAME_ICON, metadata->title_id, size_arg,
++                     (long long)icon_st.st_mtime, (long long)icon_st.st_size);
++    }
++  }
++
++  if (!add_json_string(item, "path", install_path) ||
++      !add_json_string(item, "runtime_path", install_path) ||
++      !add_json_string(item, "source_type", "installed_pkg") ||
++      !add_json_string(item, "image_type", "") ||
++      !add_json_string(item, "platform",
++                       game_platform_name(metadata->title_id, metadata)) ||
++      !add_json_string(item, "title_id", metadata->title_id) ||
++      !add_json_string(item, "content_id", metadata->content_id) ||
++      !add_json_string(item, "title_name", metadata->title_name) ||
++      !add_json_string(item, "last_access_time", metadata->last_access_time) ||
++      !add_json_string(item, "install_time", metadata->install_time) ||
++      !add_json_string(item, "icon_url", icon_url) ||
++      !add_json_int(item, "app_db_size_bytes",
++                    (int64_t)metadata->installed_size) ||
++      !add_json_bool(item, "installed", true) ||
++      !add_json_bool(item, "managed", false) ||
++      !add_json_bool(item, "mounted", false) ||
++      !add_json_bool(item, "image_backed", false) ||
++      !add_json_bool(item, "source_available", true) ||
++      !add_json_bool(item, "system_installed", true)) {
++    json_object_put(item);
++    return NULL;
++  }
++
++  if (include_size) {
++    if (!add_json_int(item, "size_status", 0) ||
++        !add_json_int(item, "size_bytes", (int64_t)metadata->installed_size)) {
++      json_object_put(item);
++      return NULL;
++    }
++  }
++
++  return item;
++}
++
+ static struct json_object *game_to_json(
+     const sm_game_cache_snapshot_entry_t *source,
+     const sm_app_db_game_info_t *metadata, bool include_size,
+@@ -1032,7 +1133,8 @@ static struct json_object *game_to_json(
+       !add_json_bool(item, "managed", managed) ||
+       !add_json_bool(item, "mounted", mounted) ||
+       !add_json_bool(item, "image_backed", source_info.image_backed) ||
+-      !add_json_bool(item, "source_available", source_available)) {
++      !add_json_bool(item, "source_available", source_available) ||
++      !add_json_bool(item, "discovered_only", !source->lifecycle_managed)) {
+     json_object_put(item);
+     return NULL;
+   }
+@@ -1142,7 +1244,10 @@ static void handle_games(struct MHD_Connection *fd,
+   }
+ 
+   struct json_object *response = new_status_response(0);
+-  struct json_object *games = json_object_new_array_ext((int)count);
++  size_t array_capacity = count + metadata_count;
++  struct json_object *games =
++      json_object_new_array_ext((int)(array_capacity > INT_MAX ? INT_MAX
++                                                               : array_capacity));
+   if (!response || !games) {
+     if (response)
+       json_object_put(response);
+@@ -1156,6 +1261,7 @@ static void handle_games(struct MHD_Connection *fd,
+ 
+   bool built = true;
+   bool cancelled = false;
++  size_t output_count = 0;
+   for (size_t i = 0; i < count; ++i) {
+     if (api_listener_stop_requested(NULL)) {
+       cancelled = true;
+@@ -1171,6 +1277,34 @@ static void handle_games(struct MHD_Connection *fd,
+       built = false;
+       break;
+     }
++    output_count++;
++  }
++
++  // Also expose normally installed PS4/PS5 titles that do not have a
++  // ShadowMount source. This makes internal/M.2 installs visible in the same
++  // library without treating /user/app or /mnt/ext*/user/app as mountable
++  // scan roots.
++  if (built && !cancelled) {
++    for (size_t i = 0; i < metadata_count; ++i) {
++      if (api_listener_stop_requested(NULL)) {
++        cancelled = true;
++        break;
++      }
++      if (!is_supported_game_title_id(metadata[i].title_id) ||
++          game_snapshot_contains_title(snapshot, count, metadata[i].title_id)) {
++        continue;
++      }
++      struct json_object *game =
++          installed_pkg_to_json(&metadata[i], include_size, true);
++      if (!game)
++        continue;
++      if (json_object_array_add(games, game) != 0) {
++        json_object_put(game);
++        built = false;
++        break;
++      }
++      output_count++;
++    }
+   }
+   free(metadata);
+   free(snapshot);
+@@ -1186,7 +1320,7 @@ static void handle_games(struct MHD_Connection *fd,
+     send_out_of_memory_response(fd);
+     return;
+   }
+-  if (!add_json_int(response, "count", (int64_t)count) ||
++  if (!add_json_int(response, "count", (int64_t)output_count) ||
+       !add_json_bool(response, "size_included", include_size)) {
+     json_object_put(games);
+     json_object_put(response);
+@@ -1236,12 +1370,7 @@ static void handle_game_info(struct MHD_Connection *connection,
+                                   0u);
+ 
+   sm_game_cache_snapshot_entry_t game_entry;
+-  if (!find_game_snapshot_by_title(title_id, &game_entry)) {
+-    int status = errno != 0 ? errno : ENOENT;
+-    send_error_response(connection, operation_http_status(status), status,
+-                        strerror(status));
+-    return;
+-  }
++  bool cached_game_found = find_game_snapshot_by_title(title_id, &game_entry);
+ 
+   sm_app_db_game_info_t *metadata = NULL;
+   size_t metadata_count = 0;
+@@ -1251,13 +1380,19 @@ static void handle_game_info(struct MHD_Connection *connection,
+                         strerror(status));
+     return;
+   }
++
+   const sm_app_db_game_info_t *game_metadata =
+       app_db_find_game_info(metadata, metadata_count, title_id);
+-  struct json_object *response =
+-      game_to_json(&game_entry, game_metadata, true, false);
++  struct json_object *response = NULL;
++  if (cached_game_found) {
++    response = game_to_json(&game_entry, game_metadata, true, false);
++  } else if (game_metadata) {
++    response = installed_pkg_to_json(game_metadata, true, false);
++  }
+   free(metadata);
++
+   if (!response) {
+-    send_out_of_memory_response(connection);
++    send_error_response(connection, 404, ENOENT, strerror(ENOENT));
+     return;
+   }
+   if (!add_json_int(response, "status", 0)) {
+diff --git a/src/sm_game_cache.c b/src/sm_game_cache.c
+index 470939d..f9597ec 100644
+--- a/src/sm_game_cache.c
++++ b/src/sm_game_cache.c
+@@ -20,6 +20,7 @@ struct GameCache {
+   char title_name[MAX_TITLE_NAME];
+   char owning_scan_root[MAX_PATH];
+   uint64_t missing_since_us;
++  bool lifecycle_managed;
+   bool valid;
+ };
+ 
+@@ -95,13 +96,15 @@ static bool resolve_game_cache_owning_scan_root(const char *path,
+ static void write_game_cache_slot(struct GameCache *entry, const char *path,
+                                   const char *title_id,
+                                   const char *title_name,
+-                                  const char *owning_scan_root) {
++                                  const char *owning_scan_root,
++                                  bool lifecycle_managed) {
+   (void)strlcpy(entry->path, path, sizeof(entry->path));
+   (void)strlcpy(entry->title_id, title_id, sizeof(entry->title_id));
+   (void)strlcpy(entry->title_name, title_name, sizeof(entry->title_name));
+   (void)strlcpy(entry->owning_scan_root, owning_scan_root,
+                 sizeof(entry->owning_scan_root));
+   entry->missing_since_us = 0;
++  entry->lifecycle_managed = lifecycle_managed;
+   entry->valid = true;
+ }
+ 
+@@ -167,7 +170,7 @@ void cache_game_entry(const char *path, const char *title_id,
+       continue;
+     }
+     write_game_cache_slot(&g_game_cache[k], path, title_id, title_name,
+-                          owning_scan_root);
++                          owning_scan_root, true);
+     pthread_mutex_unlock(&g_game_cache_mutex);
+     return;
+   }
+@@ -175,7 +178,7 @@ void cache_game_entry(const char *path, const char *title_id,
+   for (int k = 0; k < MAX_PENDING; k++) {
+     if (!g_game_cache[k].valid) {
+       write_game_cache_slot(&g_game_cache[k], path, title_id, title_name,
+-                            owning_scan_root);
++                            owning_scan_root, true);
+       pthread_mutex_unlock(&g_game_cache_mutex);
+       return;
+     }
+@@ -183,6 +186,51 @@ void cache_game_entry(const char *path, const char *title_id,
+   pthread_mutex_unlock(&g_game_cache_mutex);
+ }
+ 
++void cache_discovered_game_entry(const char *path, const char *title_id,
++                                 const char *title_name) {
++  if (!path || !title_id || title_id[0] == '\0')
++    return;
++
++  char owning_scan_root[MAX_PATH];
++  (void)resolve_game_cache_owning_scan_root(path, title_id,
++                                            owning_scan_root);
++
++  pthread_mutex_lock(&g_game_cache_mutex);
++  for (int k = 0; k < MAX_PENDING; k++) {
++    if (!g_game_cache[k].valid)
++      continue;
++    if (strcmp(g_game_cache[k].path, path) != 0 &&
++        strcmp(g_game_cache[k].title_id, title_id) != 0) {
++      continue;
++    }
++
++    // Never let a passive discovery replace an active ShadowMount source for
++    // the same title. It may refresh the same passive source, though.
++    if (g_game_cache[k].lifecycle_managed &&
++        strcmp(g_game_cache[k].path, path) != 0) {
++      pthread_mutex_unlock(&g_game_cache_mutex);
++      return;
++    }
++    bool managed = g_game_cache[k].lifecycle_managed;
++    write_game_cache_slot(&g_game_cache[k], path, title_id,
++                          title_name ? title_name : "", owning_scan_root,
++                          managed);
++    pthread_mutex_unlock(&g_game_cache_mutex);
++    return;
++  }
++
++  for (int k = 0; k < MAX_PENDING; k++) {
++    if (g_game_cache[k].valid)
++      continue;
++    write_game_cache_slot(&g_game_cache[k], path, title_id,
++                          title_name ? title_name : "", owning_scan_root,
++                          false);
++    pthread_mutex_unlock(&g_game_cache_mutex);
++    return;
++  }
++  pthread_mutex_unlock(&g_game_cache_mutex);
++}
++
+ static void prune_game_cache_entries(const char *root) {
+   const bool auto_remove = runtime_config().auto_remove_missing_games;
+ 
+@@ -208,6 +256,10 @@ static void prune_game_cache_entries(const char *root) {
+       }
+       continue;
+     }
++    if (!entry->lifecycle_managed) {
++      clear_game_cache_slot(k, "discovered source removed");
++      continue;
++    }
+     if (auto_remove)
+       continue;
+     clear_game_cache_slot(k, "source removed");
+@@ -242,7 +294,8 @@ void note_game_cache_source_seen(const char *path, const char *title_id,
+       continue;
+ 
+     write_game_cache_slot(&g_game_cache[k], path, title_id,
+-                          title_name ? title_name : "", owning_scan_root);
++                          title_name ? title_name : "", owning_scan_root,
++                          g_game_cache[k].lifecycle_managed);
+     log_debug("  [CACHE] source restored, auto-remove cancelled: %s (%s)",
+               title_id, path);
+     break;
+@@ -256,10 +309,16 @@ static void reconcile_missing_game_cache(
+   pthread_mutex_lock(&g_game_cache_mutex);
+   for (int k = 0; k < MAX_PENDING; ++k) {
+     struct GameCache *entry = &g_game_cache[k];
+-    if (!entry->valid || game_cache_source_exists(entry) ||
+-        app_db_title_list_contains(auto_remove_titles, entry->title_id)) {
++    if (!entry->valid)
++      continue;
++    if (game_cache_source_exists(entry))
++      continue;
++    if (!entry->lifecycle_managed) {
++      clear_game_cache_slot(k, "discovered source removed");
+       continue;
+     }
++    if (app_db_title_list_contains(auto_remove_titles, entry->title_id))
++      continue;
+     clear_game_cache_slot(k, "source removed");
+   }
+   pthread_mutex_unlock(&g_game_cache_mutex);
+@@ -281,7 +340,8 @@ static void reconcile_missing_game_cache(
+           free_index = k;
+         continue;
+       }
+-      if (strcmp(g_game_cache[k].title_id, title_id) == 0) {
++      if (strcmp(g_game_cache[k].title_id, title_id) == 0 &&
++          g_game_cache[k].lifecycle_managed) {
+         entry_index = k;
+         break;
+       }
+@@ -311,7 +371,7 @@ static void reconcile_missing_game_cache(
+       }
+     } else if (!image_source_exists && free_index >= 0) {
+       struct GameCache *entry = &g_game_cache[free_index];
+-      write_game_cache_slot(entry, "", title_id, "", "");
++      write_game_cache_slot(entry, "", title_id, "", "", true);
+       start_missing_timer(entry, now_us);
+     } else if (!image_source_exists && !cache_full_logged) {
+       log_debug("  [CACHE] auto-remove tracking full; remaining titles deferred");
+@@ -463,6 +523,7 @@ bool sm_game_cache_snapshot(sm_game_cache_snapshot_entry_t **entries_out,
+                   sizeof(entry->title_id));
+     (void)strlcpy(entry->title_name, g_game_cache[k].title_name,
+                   sizeof(entry->title_name));
++    entry->lifecycle_managed = g_game_cache[k].lifecycle_managed;
+   }
+   pthread_mutex_unlock(&g_game_cache_mutex);
+   *entries_out = entries;
+diff --git a/src/sm_scan.c b/src/sm_scan.c
+index 0bb5c36..55c0f05 100644
+--- a/src/sm_scan.c
++++ b/src/sm_scan.c
+@@ -429,6 +429,10 @@ static bool try_collect_candidate_for_directory(
+   note_found_title(info.title_id);
+ 
+   note_game_cache_source_seen(full_path, info.title_id, info.title_name);
++  // Keep a passive library record as soon as a valid folder dump is found.
++  // This makes sources visible in the Web UI even when mounting/registration
++  // is skipped or fails because the same title is already installed normally.
++  cache_discovered_game_entry(full_path, info.title_id, info.title_name);
+ 
+   if (!sm_image_index_record_game(full_path, info.title_id) &&
+       unstable_found_out) {
+@@ -513,6 +517,42 @@ static void collect_scan_candidates_from_manual_root(
+     char discovered_param_roots[][MAX_PATH], int *discovered_param_root_count,
+     bool *unstable_found_out);
+ 
++static bool try_collect_wrapped_app0_candidate(
++    const char *dir_path, collect_candidates_walk_ctx_t *ctx) {
++  if (!dir_path || !ctx)
++    return false;
++
++  const char *base_name = get_filename_component(dir_path);
++  if (!base_name || !is_supported_game_title_id(base_name))
++    return false;
++
++  const char *const child_suffixes[] = {"-app0", "/app0"};
++  for (size_t i = 0; i < sizeof(child_suffixes) / sizeof(child_suffixes[0]); ++i) {
++    char child_path[MAX_PATH];
++    int written;
++    if (child_suffixes[i][0] == '-') {
++      written = snprintf(child_path, sizeof(child_path), "%s/%s%s", dir_path,
++                         base_name, child_suffixes[i]);
++    } else {
++      written = snprintf(child_path, sizeof(child_path), "%s%s", dir_path,
++                         child_suffixes[i]);
++    }
++    if (written < 0 || (size_t)written >= sizeof(child_path))
++      continue;
++    if (!directory_has_param_json(child_path, NULL))
++      continue;
++
++    log_debug("  [SCAN] nested app0 source detected: %s", child_path);
++    return try_collect_candidate_for_directory(
++        child_path, ctx->candidates, ctx->max_candidates,
++        ctx->candidate_count, ctx->app_db, ctx->discovered_param_roots,
++        ctx->discovered_param_root_count, false, ctx->manual_source_path,
++        ctx->unstable_found_out);
++  }
++
++  return false;
++}
++
+ static sm_scan_tree_dir_visit_t collect_candidate_directory_visit(
+     const char *dir_path, unsigned int depth_from_root, void *ctx_ptr) {
+   if (depth_from_root == 0u)
+@@ -531,6 +571,12 @@ static sm_scan_tree_dir_visit_t collect_candidate_directory_visit(
+     return SM_SCAN_TREE_DIR_SKIP_DESCEND;
+   }
+ 
++  // Common dump layout: <TITLE_ID>/<TITLE_ID>-app0/sce_sys/param.json.
++  // Detect this wrapper even when scan_depth=1 so users do not need to
++  // flatten dumps or increase the global recursion depth just for app0.
++  if (try_collect_wrapped_app0_candidate(dir_path, ctx))
++    return SM_SCAN_TREE_DIR_SKIP_DESCEND;
++
+   return SM_SCAN_TREE_DIR_DESCEND;
+ }
+ 
+diff --git a/web/index.html b/web/index.html
+index 57ea180..56db294 100644
+--- a/web/index.html
++++ b/web/index.html
+@@ -1118,7 +1118,10 @@
+         body.append(heading);
+         const badges = node("div", "badges");
+         badges.append(badge(game.platform || t("unknown")));
+-        badges.append(badge(game.image_backed ? (game.image_type || t("image")) : t("folder"), game.image_backed ? "image" : ""));
++        const sourceLabel = game.source_type === "installed_pkg"
++          ? t("installed")
++          : game.image_backed ? (game.image_type || t("image")) : t("folder");
++        badges.append(badge(sourceLabel, game.image_backed ? "image" : ""));
+         if (game.mounted) badges.append(badge(t("mounted"), "live"));
+         body.append(badges);
+         const path = node("div", "game-path", game.path || t("sourceUnavailable"));
+@@ -1141,8 +1144,8 @@
+         const filter = $("filter").value;
+         return state.games.filter((game) => {
+           const matchesFilter = filter === "all" ||
+-            (filter === "folder" && !game.image_backed) ||
+-            (filter === "image" && game.image_backed) ||
++            (filter === "folder" && game.source_type === "folder") ||
++            (filter === "image" && game.source_type === "image") ||
+             game.platform === filter;
+           if (!matchesFilter) return false;
+           if (!query) return true;
+@@ -1624,7 +1627,7 @@
+         details.append(coverFor(game, true));
+         const content = node("div");
+         const badges = node("div", "badges");
+-        badges.append(badge(game.source_type === "folder" ? t("folder") : game.source_type === "image" ? t("image") : game.source_type));
++        badges.append(badge(game.source_type === "folder" ? t("folder") : game.source_type === "image" ? t("image") : game.source_type === "installed_pkg" ? t("installed") : game.source_type));
+         if (game.image_type) badges.append(badge(game.image_type, "image"));
+         if (game.mounted) badges.append(badge(t("mounted"), "live"));
+         content.append(badges);
+@@ -1642,27 +1645,30 @@
+         const actions = $("modalActions");
+         actions.replaceChildren();
+         const runtimeAction = appendRuntimeActions(actions, game);
+-        const storageBusy = Boolean(state.storageJob && state.storageJob.active);
+-        const copy = actionButton(t("copy"), () => storageOperation(game, "copy"));
+-        const move = actionButton(t("move"), () => storageOperation(game, "move"));
+-        const unpack = game.image_backed
+-          ? actionButton(t("unpack"), () => unpackImage(game))
+-          : null;
+-        const remove = actionButton(t("deleteSource"), () => deleteSource(game), "danger");
+-        copy.disabled = storageBusy;
+-        move.disabled = storageBusy;
+-        if (unpack) unpack.disabled = storageBusy || game.mounted;
+-        remove.disabled = storageBusy;
+-        if (storageBusy) {
+-          copy.title = t("storageBusyHint");
+-          move.title = copy.title;
+-          if (unpack) unpack.title = copy.title;
+-          remove.title = copy.title;
++        const systemInstalled = game.source_type === "installed_pkg" || game.system_installed;
++        if (!systemInstalled) {
++          const storageBusy = Boolean(state.storageJob && state.storageJob.active);
++          const copy = actionButton(t("copy"), () => storageOperation(game, "copy"));
++          const move = actionButton(t("move"), () => storageOperation(game, "move"));
++          const unpack = game.image_backed
++            ? actionButton(t("unpack"), () => unpackImage(game))
++            : null;
++          const remove = actionButton(t("deleteSource"), () => deleteSource(game), "danger");
++          copy.disabled = storageBusy;
++          move.disabled = storageBusy;
++          if (unpack) unpack.disabled = storageBusy || game.mounted;
++          remove.disabled = storageBusy;
++          if (storageBusy) {
++            copy.title = t("storageBusyHint");
++            move.title = copy.title;
++            if (unpack) unpack.title = copy.title;
++            remove.title = copy.title;
++          }
++          actions.append(copy, move);
++          if (unpack) actions.append(unpack);
++          actions.append(remove);
+         }
+-        actions.append(copy, move);
+-        if (unpack) actions.append(unpack);
+         actions.append(actionButton(t("uninstall"), () => uninstallGame(game), "danger"));
+-        actions.append(remove);
+         if (focusRuntimeAction && runtimeAction) runtimeAction.focus();
+       }
+ 

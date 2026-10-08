@@ -75,7 +75,6 @@ Supported keys (all optional):
 - `ufs_backend=lvd|md` (default: `lvd`)
 - `nested_pfs_index_cache=1|0` (request the containing PFS compressed-file index cache before attaching a nested image; default: `0`)
 - `backport_fakelib=1|0` (`1` mounts sandbox `fakelib` overlays for running games; default: `1`)
-- `fakelib_exclude=<TITLE_ID>` (repeatable, up to 128 titles; disables all fakelib overlays for matching PPSA/CUSA/LAPY/FAKE IDs; default: no exclusions)
 - `update_emulators=1|0` (`1` updates matching emulator files for folder/image games; installed PKGs and `fakelib2` are excluded; default: `1`)
 - `emulators_path=<absolute_path>` (folder containing emulator update files; default: `/data/shadowmount/emus`)
 - `auto_update_ampr=1|0` (check for a new `libSceAmpr.sprx` 30 seconds after startup and every four hours; default: `0`)
@@ -138,7 +137,7 @@ Supported notification languages:
 | Ukrainian | `uk-UA` |
 | Vietnamese | `vi-VN` |
 
-The public API routes and JSON schemas are documented in [docs/api.md](docs/api.md)
+The public API routes and JSON schemas are documented in [docs/socket-api.md](docs/socket-api.md)
 and available as an [OpenAPI manifest](docs/openapi.yaml).
 
 Per-image mode override behavior:
@@ -189,13 +188,10 @@ Backport overlay behavior:
 - If multiple scan paths provide the same title backport, the game's own scan path wins; otherwise scan path order is used, followed by the internal fallback.
 - ShadowMount+ checks the selected backport for `fakelib2` and then `fakelib`; if neither exists, it checks the original game source in the same order. The selected directory is mounted into the running game's sandbox `common/lib`. A selected `fakelib2` is always mounted directly and exclusively: neither emulator updates nor the global fakelib can replace or supplement it.
 - For folder/image games, `update_emulators=1` makes matching files from `emulators_path` replace files in the selected game fakelib, except when `fakelib2` is selected. Installed PKGs never compose `emulators_path` into their fakelib. The cache is refreshed when its sources change and expires after seven days without a game launch.
-- Before preparing and mounting fakelib for an installed PPR PKG, ShadowMount+ deletes `libSceAmpr.sprx`, `libScePlayGo.sprx` and `libkernel.sprx` from the selected `/data/homebrew/backports/<TITLE_ID>/fakelib`. Missing files are harmless skips; a deletion failure stops the fakelib mount.
 - With `auto_update_ampr=1`, ShadowMount+ checks for AMPR updates 30 seconds after startup and every four hours. It downloads a missing or newer emulator and displays a notification after a successful update.
 - The backport notification adds `Emulators updated` when emulator files are updated for the launched game.
 - If both global and per-game fakelib exist, they are combined in the game cache according to `global_fakelib_priority`, unless the selected backport contains `fakelib2`. Without a per-game fakelib, the global folder is mounted directly.
 - Use repeatable `global_fakelib_exclude=<TITLE_ID>` entries to skip the global fakelib for specific games without disabling per-game fakelib.
-- Use repeatable `fakelib_exclude=<TITLE_ID>` entries to disable per-game `fakelib`, `fakelib2`, global fakelib and cache preparation for specific games. `/data`, `/mnt` and PKG `app0` backports remain enabled. Reloaded exclusions apply on the next launch; existing mounts remain until game exit. Title IDs are case-insensitive and must have a supported prefix followed by five digits; invalid entries and entries beyond the 128-title limit are logged and ignored.
-- `/mnt` and `/data` are always mounted for PS5 (`PPSA*`), PS4 (`CUSA*`) and homebrew (`LAPY*`, `FAKE*`) titles through writable `nullfs` at `/mnt/sandbox/<TITLE_ID>_<index>/mnt` and `/mnt/sandbox/<TITLE_ID>_<index>/data`. Supported IDs have one of these prefixes followed by five digits. These mounts follow the game process lifetime: they are removed on process exit.
 - `backport_fakelib=0` disables the sandbox `fakelib` watcher, including global fakelib and emulator updates.
 - For `backport_fakelib` to work correctly, the standalone `BackPork` payload must be disabled. Running both at the same time will conflict.
 

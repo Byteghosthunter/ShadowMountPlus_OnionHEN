@@ -429,6 +429,10 @@ static bool try_collect_candidate_for_directory(
   note_found_title(info.title_id);
 
   note_game_cache_source_seen(full_path, info.title_id, info.title_name);
+  // Keep a passive library record as soon as a valid folder dump is found.
+  // This makes sources visible in the Web UI even when mounting/registration
+  // is skipped or fails because the same title is already installed normally.
+  cache_discovered_game_entry(full_path, info.title_id, info.title_name);
 
   if (!sm_image_index_record_game(full_path, info.title_id) &&
       unstable_found_out) {
@@ -513,6 +517,42 @@ static void collect_scan_candidates_from_manual_root(
     char discovered_param_roots[][MAX_PATH], int *discovered_param_root_count,
     bool *unstable_found_out);
 
+static bool try_collect_wrapped_app0_candidate(
+    const char *dir_path, collect_candidates_walk_ctx_t *ctx) {
+  if (!dir_path || !ctx)
+    return false;
+
+  const char *base_name = get_filename_component(dir_path);
+  if (!base_name || !is_supported_game_title_id(base_name))
+    return false;
+
+  const char *const child_suffixes[] = {"-app0", "/app0"};
+  for (size_t i = 0; i < sizeof(child_suffixes) / sizeof(child_suffixes[0]); ++i) {
+    char child_path[MAX_PATH];
+    int written;
+    if (child_suffixes[i][0] == '-') {
+      written = snprintf(child_path, sizeof(child_path), "%s/%s%s", dir_path,
+                         base_name, child_suffixes[i]);
+    } else {
+      written = snprintf(child_path, sizeof(child_path), "%s%s", dir_path,
+                         child_suffixes[i]);
+    }
+    if (written < 0 || (size_t)written >= sizeof(child_path))
+      continue;
+    if (!directory_has_param_json(child_path, NULL))
+      continue;
+
+    log_debug("  [SCAN] nested app0 source detected: %s", child_path);
+    return try_collect_candidate_for_directory(
+        child_path, ctx->candidates, ctx->max_candidates,
+        ctx->candidate_count, ctx->app_db, ctx->discovered_param_roots,
+        ctx->discovered_param_root_count, false, ctx->manual_source_path,
+        ctx->unstable_found_out);
+  }
+
+  return false;
+}
+
 static sm_scan_tree_dir_visit_t collect_candidate_directory_visit(
     const char *dir_path, unsigned int depth_from_root, void *ctx_ptr) {
   if (depth_from_root == 0u)
@@ -530,6 +570,12 @@ static sm_scan_tree_dir_visit_t collect_candidate_directory_visit(
           ctx->unstable_found_out)) {
     return SM_SCAN_TREE_DIR_SKIP_DESCEND;
   }
+
+  // Common dump layout: <TITLE_ID>/<TITLE_ID>-app0/sce_sys/param.json.
+  // Detect this wrapper even when scan_depth=1 so users do not need to
+  // flatten dumps or increase the global recursion depth just for app0.
+  if (try_collect_wrapped_app0_candidate(dir_path, ctx))
+    return SM_SCAN_TREE_DIR_SKIP_DESCEND;
 
   return SM_SCAN_TREE_DIR_DESCEND;
 }
