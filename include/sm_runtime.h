@@ -24,11 +24,10 @@ bool request_runtime_sleep_mode(bool active, const char *reason);
 void runtime_mount_state_lock(void);
 void runtime_mount_state_unlock(void);
 // Request an immediate scan cycle with a descriptive source string.
-// Return false when rest mode prevents accepting the request.
-bool request_scan_now(const char *reason);
+void request_scan_now(const char *reason);
 // Request an immediate scan and optionally reset mount/install retry counters
 // immediately before that scan starts.
-bool request_scan_now_with_options(const char *reason, bool reset_attempts);
+void request_scan_now_with_options(const char *reason, bool reset_attempts);
 // Consume a pending immediate scan request and its merged options.
 bool consume_scan_now_request(char *reason_out, size_t reason_out_size,
                               bool *reset_attempts_out);

@@ -325,7 +325,7 @@ paths:
           $ref: "#/components/responses/Preflight"
     post:
       operationId: getGameInfo
-      summary: Get detailed metadata and size for a folder, image or installed PKG
+      summary: Get detailed metadata and source size for one managed game
       tags: [Games]
       requestBody:
         $ref: "#/components/requestBodies/TitleRequest"
@@ -340,64 +340,6 @@ paths:
           $ref: "#/components/responses/Busy"
         "500":
           $ref: "#/components/responses/InternalError"
-
-  /api/v1/games/fakelib:
-    options:
-      operationId: preflightGameFakelib
-      summary: CORS preflight
-      tags: [Games]
-      responses:
-        "204":
-          $ref: "#/components/responses/Preflight"
-    post:
-      operationId: setGameFakelib
-      summary: Enable or disable fakelib for a PS5 game on its next launch
-      tags: [Games]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [title_id, enabled]
-              properties:
-                title_id:
-                  $ref: "#/components/schemas/TitleId"
-                  description: Must identify a PS5 game; homebrew uses its app.db platform.
-                enabled:
-                  type: boolean
-      responses:
-        "200":
-          description: Per-title policy saved; existing mounts are preserved
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status, title_id, fakelib_enabled, fakelib_effective_enabled, saved, applies_on_next_launch]
-                properties:
-                  status:
-                    type: integer
-                    const: 0
-                  title_id:
-                    $ref: "#/components/schemas/TitleId"
-                  fakelib_enabled:
-                    type: boolean
-                  fakelib_effective_enabled:
-                    type: boolean
-                  saved:
-                    type: boolean
-                    const: true
-                  applies_on_next_launch:
-                    type: boolean
-                    const: true
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
-        "507":
-          description: Exclusion list is full; configuration was not changed
 
   /api/v1/games/icon:
     get:
@@ -722,17 +664,10 @@ paths:
     post:
       operationId: deleteGameSource
       summary: Asynchronously delete a game folder or backing image
-      description: A confirmed request for a cached source that is already absent queues safe scanner reconciliation without starting a storage job or directly uninstalling the title. Absence may also mean disconnected storage. Permission and I/O errors remain failures.
       tags: [Storage]
       requestBody:
         $ref: "#/components/requestBodies/StorageDeleteRequest"
       responses:
-        "200":
-          description: Source already absent; library reconciliation queued
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MissingSourceResponse"
         "202":
           $ref: "#/components/responses/StorageJobAccepted"
         "400":
@@ -1197,7 +1132,7 @@ components:
   schemas:
     TitleId:
       type: string
-      pattern: "^(CUSA|PPSA|LAPY|FAKE)[0-9]{5}$"
+      pattern: "^(CUSA|PPSA|FAKE)[0-9]{5}$"
       examples: [PPSA12345]
 
     TitleRequest:
@@ -1578,7 +1513,6 @@ components:
         - title_id
         - content_id
         - title_name
-        - version
         - last_access_time
         - install_time
         - icon_url
@@ -1588,22 +1522,16 @@ components:
         - mounted
         - image_backed
         - source_available
-        - installed_pkg
-        - can_uninstall
-        - can_manage_source
-        - can_toggle_fakelib
-        - fakelib_enabled
-        - fakelib_effective_enabled
       properties:
         path:
           type: string
-          description: Physical game folder, outer backing-image path or installed app.pkg.
+          description: Physical game folder or outer backing-image path.
         runtime_path:
           type: string
-          description: Runtime game directory used by ShadowMount; empty for installed PKGs.
+          description: Runtime game directory used by ShadowMount.
         source_type:
           type: string
-          enum: [folder, image, pkg]
+          enum: [folder, image]
         image_type:
           type: string
           enum: ["", ufs, exfatfs, pfs, pfsc, unknown]
@@ -1616,9 +1544,6 @@ components:
           type: string
         title_name:
           type: string
-        version:
-          type: string
-          description: AppInfoJson CONTENT_VERSION (PS5) or APP_VER (PS4), or an empty string when unavailable.
         last_access_time:
           type: string
           description: AppInfoJson #_last_access_time value, falling back to app.db lastAccessTime, or an empty string.
@@ -1642,22 +1567,6 @@ components:
           type: boolean
         source_available:
           type: boolean
-        installed_pkg:
-          type: boolean
-        can_uninstall:
-          type: boolean
-        can_manage_source:
-          type: boolean
-          description: False for installed PKGs; source mutations are forbidden.
-        can_toggle_fakelib:
-          type: boolean
-          description: True for PS5 games in PKGs, images and folders.
-        fakelib_enabled:
-          type: boolean
-          description: Per-title policy; changes apply on the next launch.
-        fakelib_effective_enabled:
-          type: boolean
-          description: Per-title policy combined with the global backport_fakelib switch.
         size_status:
           type: integer
           minimum: 0
@@ -1666,7 +1575,7 @@ components:
           type: integer
           format: int64
           minimum: 0
-          description: Image file size, sum of folder files or installed PKG size from app.db (package file size when unavailable).
+          description: Image file size or sum of files in the game folder.
         status:
           type: integer
           const: 0
@@ -1698,7 +1607,7 @@ components:
     StorageJobResponse:
       type: object
       additionalProperties: false
-      required: [status, job_id, operation, state, active, cancellable, cancel_requested, title_id, source_type, source, runtime_source, destination, delete_source, total_bytes, processed_bytes, total_files, processed_files, progress_percent, speed_bytes_per_second, elapsed_ms, affected_titles, result_status, result_error, result_error_reason, scan_queued]
+      required: [status, job_id, operation, state, active, cancellable, cancel_requested, title_id, source_type, source, runtime_source, destination, delete_source, total_bytes, processed_bytes, total_files, processed_files, progress_percent, speed_bytes_per_second, elapsed_ms, affected_titles, result_status, result_error, scan_queued]
       properties:
         status:
           type: integer
@@ -1772,16 +1681,13 @@ components:
           minimum: 0
         result_error:
           type: string
-          description: English error text; localized clients should use result_error_reason when available.
-        result_error_reason:
-          $ref: "#/components/schemas/OperationErrorReason"
         scan_queued:
           type: boolean
 
     ScanResponse:
       type: object
       additionalProperties: false
-      required: [status, queued, reset_attempts, scan_queued, scan_deferred, scan_deferred_reason]
+      required: [status, queued, reset_attempts]
       properties:
         status:
           type: integer
@@ -1791,15 +1697,6 @@ components:
           const: true
         reset_attempts:
           type: boolean
-        scan_queued:
-          type: boolean
-          const: true
-        scan_deferred:
-          type: boolean
-          description: Whether game runtime or rest mode prevents scanning at response time; queue acceptance does not mean scan completion.
-        scan_deferred_reason:
-          type: string
-          enum: ["", game_active, runtime_prepared, rest_mode]
 
     ManualUpdateResponse:
       type: object
@@ -1867,7 +1764,7 @@ components:
     UninstallResponse:
       type: object
       additionalProperties: false
-      required: [status, title_id, uninstall_requested, scan_queued, scan_deferred, scan_deferred_reason]
+      required: [status, title_id, uninstall_requested]
       properties:
         status:
           type: integer
@@ -1877,36 +1774,6 @@ components:
         uninstall_requested:
           type: boolean
           const: true
-        scan_queued:
-          type: boolean
-          description: Full synchronization was queued because the known source was absent before uninstall; retained sources are not immediately rediscovered.
-        scan_deferred:
-          type: boolean
-        scan_deferred_reason:
-          type: string
-          enum: ["", game_active, runtime_prepared, rest_mode]
-
-    MissingSourceResponse:
-      type: object
-      additionalProperties: false
-      required: [status, title_id, source_missing, scan_queued, scan_deferred, scan_deferred_reason]
-      properties:
-        status:
-          type: integer
-          const: 0
-        title_id:
-          $ref: "#/components/schemas/TitleId"
-        source_missing:
-          type: boolean
-          const: true
-        scan_queued:
-          type: boolean
-          const: true
-        scan_deferred:
-          type: boolean
-        scan_deferred_reason:
-          type: string
-          enum: ["", game_active, runtime_prepared, rest_mode]
 
     ErrorResponse:
       type: object
@@ -1919,10 +1786,3 @@ components:
           description: Positive errno value
         error:
           type: string
-        error_reason:
-          $ref: "#/components/schemas/OperationErrorReason"
-
-    OperationErrorReason:
-      type: string
-      description: Stable reason code for localized operation errors; empty for generic errno failures.
-      enum: ["", rest_mode, game_active, install_pending, runtime_prepared, scanner_busy, runtime_busy, title_unmount_busy, image_unmount_busy, unpack_mounted, storage_busy, storage_unavailable]

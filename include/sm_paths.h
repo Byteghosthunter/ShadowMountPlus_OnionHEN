@@ -35,22 +35,30 @@
 #define SM_DEFAULT_SCAN_PATHS_INITIALIZER                                      \
   {                                                                            \
     /* Internal */                                                             \
-    DEFAULT_BACKPORT_SCAN_PATH, "/data/etaHEN/games",                          \
+    DEFAULT_BACKPORT_SCAN_PATH, "/data/etaHEN/games",                         \
+        "/data/OnionHEN/games",                                               \
     /* Extended Storage */                                                     \
-    "/mnt/ext0/homebrew", "/mnt/ext0/etaHEN/games",                           \
+    "/mnt/ext0/homebrew", "/mnt/ext0/etaHEN/games",                          \
+        "/mnt/ext0/OnionHEN/games",                                           \
     /* M.2 Drive */                                                            \
-    "/mnt/ext1/homebrew", "/mnt/ext1/etaHEN/games",                           \
+    "/mnt/ext1/homebrew", "/mnt/ext1/etaHEN/games",                          \
+        "/mnt/ext1/OnionHEN/games",                                           \
     /* USB Subfolders */                                                       \
-    "/mnt/usb0/homebrew", "/mnt/usb1/homebrew", "/mnt/usb2/homebrew",         \
-        "/mnt/usb3/homebrew", "/mnt/usb4/homebrew", "/mnt/usb5/homebrew",     \
-        "/mnt/usb6/homebrew", "/mnt/usb7/homebrew",                           \
-        "/mnt/usb0/etaHEN/games", "/mnt/usb1/etaHEN/games",                   \
-        "/mnt/usb2/etaHEN/games", "/mnt/usb3/etaHEN/games",                   \
-        "/mnt/usb4/etaHEN/games", "/mnt/usb5/etaHEN/games",                   \
-        "/mnt/usb6/etaHEN/games", "/mnt/usb7/etaHEN/games",                   \
-    /* USB Root Paths */                                                       \
-    "/mnt/usb0", "/mnt/usb1", "/mnt/usb2", "/mnt/usb3", "/mnt/usb4",          \
-        "/mnt/usb5", "/mnt/usb6", "/mnt/usb7", "/mnt/ext0", "/mnt/ext1", NULL \
+    "/mnt/usb0/homebrew", "/mnt/usb1/homebrew", "/mnt/usb2/homebrew",        \
+        "/mnt/usb3/homebrew", "/mnt/usb4/homebrew", "/mnt/usb5/homebrew",    \
+        "/mnt/usb6/homebrew", "/mnt/usb7/homebrew",                          \
+        "/mnt/usb0/etaHEN/games", "/mnt/usb1/etaHEN/games",                  \
+        "/mnt/usb2/etaHEN/games", "/mnt/usb3/etaHEN/games",                  \
+        "/mnt/usb4/etaHEN/games", "/mnt/usb5/etaHEN/games",                  \
+        "/mnt/usb6/etaHEN/games", "/mnt/usb7/etaHEN/games",                  \
+        "/mnt/usb0/OnionHEN/games", "/mnt/usb1/OnionHEN/games",              \
+        "/mnt/usb2/OnionHEN/games", "/mnt/usb3/OnionHEN/games",              \
+        "/mnt/usb4/OnionHEN/games", "/mnt/usb5/OnionHEN/games",              \
+        "/mnt/usb6/OnionHEN/games", "/mnt/usb7/OnionHEN/games",              \
+    /* USB / storage root paths */                                             \
+    "/mnt/usb0", "/mnt/usb1", "/mnt/usb2", "/mnt/usb3", "/mnt/usb4",     \
+        "/mnt/usb5", "/mnt/usb6", "/mnt/usb7", "/mnt/ext0", "/mnt/ext1", \
+        NULL                                                                   \
   }
 
 #endif

@@ -10,15 +10,20 @@ typedef struct {
   char path[MAX_PATH];
   char title_id[MAX_TITLE_ID];
   char title_name[MAX_TITLE_NAME];
+  bool lifecycle_managed;
 } sm_game_cache_snapshot_entry_t;
 
 typedef bool (*game_cache_iter_fn)(const char *path, const char *title_id,
                                    const char *title_name,
                                    const char *owning_scan_root, void *ctx);
 
-// Cache resolved metadata for a mounted or discovered game.
+// Cache a game whose registration/mount lifecycle is managed by ShadowMount.
 void cache_game_entry(const char *path, const char *title_id,
                       const char *title_name);
+// Cache a valid discovered folder source for library visibility without
+// claiming lifecycle ownership. A later successful mount upgrades the entry.
+void cache_discovered_game_entry(const char *path, const char *title_id,
+                                 const char *title_name);
 // Drop invalid or stale entries from the game cache.
 void prune_game_cache(void);
 // Drop invalid or stale entries that belong to a specific scan root.

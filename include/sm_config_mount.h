@@ -62,9 +62,5 @@ bool upsert_image_sector_size_autotune(const char *filename,
                                        uint32_t *sector_size_out);
 // Return true when the global fakelib overlay is disabled for this title.
 bool is_global_fakelib_excluded_for_title(const char *title_id);
-// Return true when all fakelib overlays are disabled for this title.
-bool is_fakelib_excluded_for_title(const char *title_id);
-// Persist a supported title's fakelib policy without changing its active mounts.
-bool sm_config_set_title_fakelib_enabled(const char *title_id, bool enabled);
 
 #endif
