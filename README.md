@@ -14,6 +14,63 @@
 **Compatibility:** Supports Jailbroken PS5 firmwares running **[Kstuff-lite v1.07+](https://github.com/EchoStretch/kstuff-lite)**, including firmware 2.00.
 
 
+## 🚀 This fork: enhanced OnionHEN / M.2 game detection
+
+This fork adds detection improvements for **OnionHEN game folders** and for **normally installed games on internal or M.2 storage**. The goal is to make the Web UI/library reflect both ShadowMount-managed dumps and titles that the PS5 already manages through its normal application database.
+
+### What changed in this fork
+
+- Added built-in OnionHEN game roots:
+  - `/data/OnionHEN/games`
+  - `/mnt/ext0/OnionHEN/games`
+  - `/mnt/ext1/OnionHEN/games`
+  - `/mnt/usb0..7/OnionHEN/games`
+- Added automatic probing for the common nested `-app0` layout, for example:
+
+  ```text
+  /data/OnionHEN/games/PPSA34015/PPSA34015-app0/sce_sys/param.json
+  ```
+
+  This layout is detected even when the global `scan_depth` is `1`. Normal `scan_depth=2` behavior is unchanged.
+- A valid folder dump can be shown in the ShadowMount library as soon as its `sce_sys/param.json` is discovered, before mount/registration succeeds.
+- Normally installed titles are also exposed in the Web UI by reading the PS5 application database (`app.db`). Supported install locations include:
+  - `/user/app/<TITLE_ID>`
+  - `/mnt/ext0/user/app/<TITLE_ID>`
+  - `/mnt/ext0/ps5/user/app/<TITLE_ID>`
+  - `/mnt/ext1/user/app/<TITLE_ID>`
+- System-managed installs are tagged as `source_type = installed_pkg` and are treated as **read-only sources** in the ShadowMount Web UI. Copy/Move/Delete Source actions are not offered for them.
+
+### How detection works
+
+| Source type | Example | Detection method |
+| --- | --- | --- |
+| Folder dump | `/data/OnionHEN/games/PPSA34015/PPSA34015-app0/` | `sce_sys/param.json` |
+| M.2 / internal normal install | `/mnt/ext1/user/app/PPSA28183/` or `/user/app/PPSA28183/` | `app.db` + existing install directory |
+| Image | `.ffpkg`, `.exfat`, `.ffpfs`, `.ffpfsc` | Existing ShadowMount image scanner |
+
+A normal PS5 install under `/user/app` or `/mnt/ext1/user/app` does **not** need a visible `sce_sys/param.json` in that directory. Its title metadata comes from `app.db` instead.
+
+> **Important:** Manually copying a directory into `/mnt/ext1/user/app/<TITLE_ID>` does not automatically make it a valid PS5 installation. The console's application database must also contain the matching title. Do not use `/mnt/ext1/user/app` as a normal ShadowMount `scanpath`.
+
+### Recommended OnionHEN + M.2 config
+
+```ini
+scanpath=/data/OnionHEN/games
+scanpath=/mnt/ext1/OnionHEN/games
+scan_depth=2
+
+api_enabled=1
+api_bind_address=0.0.0.0
+api_port=10101
+```
+
+When one or more custom `scanpath=` entries are present, they replace the built-in scan-path list, so list every custom dump root you want scanned. Normal system-managed installs under `/user/app` and `/mnt/ext*/user/app` are discovered separately through `app.db` and do not need to be added as `scanpath=` entries.
+
+For implementation notes and testing details, see [DETECTION_PATCH_README.md](DETECTION_PATCH_README.md).
+
+> **Patch status:** Experimental. Keep a backup of your original `shadowmountplus.elf` and configuration before testing on hardware.
+
+
 ## 💜 Support Development
 
  If you want to support this project, you can donate
